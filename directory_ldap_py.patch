@@ -1,0 +1,86 @@
+*** directory_ldap.py.org	2019-04-04 15:11:17.409605813 +0900
+--- directory_ldap.py	2019-04-04 14:51:41.591023281 +0900
+*************** class LDAPDirectoryConnector(object):
+*** 68,75 ****
+--- 68,79 ----
+              '(&(|(objectCategory=group)(objectClass=groupOfNames)(objectClass=posixGroup))(cn={group}))'))
+          builder.set_string_value('all_users_filter', six.text_type(
+              '(&(objectClass=user)(objectCategory=person)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))'))
++         # modifyed 2019/04/03 by M.Hagane <hagane@ipc.hkg.ac.jp>
+          builder.set_string_value('group_member_filter_format', six.text_type(
+              '(memberOf={group_dn})'))
++         # added 2019/04/04 by M.Hagane <hagane@ipc.hkg.ac.jp>
++         builder.set_string_value('user_group_id_format', '{gidNumber}')
++ 
+          builder.set_bool_value('require_tls_cert', False)
+          builder.set_string_value('string_encoding', 'utf8')
+          builder.set_string_value('user_identity_type_format', None)
+*************** class LDAPDirectoryConnector(object):
+*** 139,151 ****
+              if not group_dn:
+                  self.logger.warning("No group found for: %s", group)
+                  continue
+!             group_member_subfilter = self.format_ldap_query_string(group_member_filter_format, group_dn=group_dn)
+              if not group_member_subfilter.startswith('('):
+                  group_member_subfilter = six.text_type('(') + group_member_subfilter + six.text_type(')')
+              user_subfilter = all_users_filter
+              if not user_subfilter.startswith('('):
+                  user_subfilter = six.text_type('(') + user_subfilter + six.text_type(')')
+              group_user_filter = six.text_type('(&') + group_member_subfilter + user_subfilter + six.text_type(')')
+              group_users = 0
+              try:
+                  for user_dn, user in self.iter_users(group_user_filter, extended_attributes):
+--- 143,163 ----
+              if not group_dn:
+                  self.logger.warning("No group found for: %s", group)
+                  continue
+! 
+!             # added 2019/04/03 by M.Hagane <hagane@ipc.hkg.ac.jp>
+!             group_id = self.find_ldap_group_id(group)
+! 
+!             # modifyed 2019/04/04 by M.Hagane <hagane@ipc.hkg.ac.jp>
+!             group_member_subfilter = self.format_ldap_query_string(group_member_filter_format, group_id=group_id)
+!             self.logger.debug('group_member_subfilter "%s"', group_member_subfilter)
+! 
+              if not group_member_subfilter.startswith('('):
+                  group_member_subfilter = six.text_type('(') + group_member_subfilter + six.text_type(')')
+              user_subfilter = all_users_filter
+              if not user_subfilter.startswith('('):
+                  user_subfilter = six.text_type('(') + user_subfilter + six.text_type(')')
+              group_user_filter = six.text_type('(&') + group_member_subfilter + user_subfilter + six.text_type(')')
++             self.logger.debug('group_user_filter "%s"', group_user_filter)
+              group_users = 0
+              try:
+                  for user_dn, user in self.iter_users(group_user_filter, extended_attributes):
+*************** class LDAPDirectoryConnector(object):
+*** 197,202 ****
+--- 209,237 ----
+                  group_dn = current_tuple[0]
+          return group_dn
+  
++     def find_ldap_group_id(self, group):
++         """
++         :type group: str
++         :rtype str
++         """
++         connection = self.connection
++         options = self.options
++         base_dn = six.text_type(options['base_dn'])
++         group_filter_format = six.text_type(options['group_filter_format'])
++         try:
++             filter_string = self.format_ldap_query_string(group_filter_format, group=group)
++             attributes = None
++             res = connection.search(base_dn, ldap.SCOPE_SUBTREE,
++                                    filterstr=filter_string, attrlist=attributes)
++             
++         except Exception as e:
++             raise AssertionException('Unexpected LDAP failure reading group info: %s' % e)
++ 
++         res_type, res_data = connection.result(res)
++         group_id = str(res_data[0][1]['gidNumber'][0])
++ 
++         return group_id
++ 
+      def iter_users(self, users_filter, extended_attributes):
+          options = self.options
+          base_dn = six.text_type(options['base_dn'])
